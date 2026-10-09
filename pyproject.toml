@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "entity-linker"
 version = "0.1.0"
@@ -5,11 +9,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "es-core-news-sm",
     "fastapi>=0.142.2",
+    "gliner>=0.2.29",
     "httpx>=0.28.1",
+    "protobuf>=7.36.2",
     "pydantic>=2.13.5",
     "python-dotenv>=1.2.4",
+    "sentencepiece>=0.2.2",
     "spacy>=3.8.16",
+    "torch>=2.14.1",
     "uvicorn>=0.54.0",
 ]
 
@@ -19,3 +28,20 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PyTorch (dependencia de GLiNER) en su versión solo CPU: la de PyPI incluye
+# varios GB de librerías CUDA que el servicio no usa
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+es-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.8.0/es_core_news_sm-3.8.0-py3-none-any.whl" }

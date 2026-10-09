@@ -9,10 +9,10 @@ Servicio REST de Reconocimiento de Entidades Nombradas (NER) y Desambiguación /
 El sistema implementa un flujo modular y asíncrono diseñado para alta velocidad, resiliencia y escalabilidad:
 
 ```text
-[Texto de entrada] ──► [1. NER Engine (SpaCy)] ──► [2. Async Candidate Retrieval (Wikidata API)] ──► [3. Disambiguator & Confidence Scoring] ──► [Respuesta JSON]
+[Texto de entrada] ──► [1. NER Engine (GLiNER)] ──► [2. Async Candidate Retrieval (Wikidata API)] ──► [3. Disambiguator & Confidence Scoring] ──► [Respuesta JSON]
 ```
 
-1. **NER (Named Entity Recognition):** Extracción de *spans* (posiciones exactas en caracteres) y etiquetas (`PER`, `ORG`, `LOC`, `MISC`) utilizando SpaCy (`es_core_news_lg`).
+1. **NER (Named Entity Recognition):** Extracción de *spans* (posiciones exactas en caracteres) y etiquetas (`PER`, `ORG`, `LOC`, `MISC`) utilizando [GLiNER](https://github.com/urchade/GLiNER) (`urchade/gliner_multi-v2.1`), un modelo multilingüe *zero-shot* que reconoce las categorías que se le indiquen (persona, organización, lugar, obra, evento) sin reentrenarlo. Funciona en CPU (~300 ms por texto corto) y los textos largos se procesan por trozos de frases completas.
 2. **Candidate Retrieval:** Búsqueda asíncrona concurrente (`httpx` + `asyncio.gather`) en la API oficial de Wikidata (`wbsearchentities`) con sistema de caché en memoria para minimizar la latencia.
 3. **Entity Disambiguation:** Algoritmo de puntuación de confianza basado en coincidencia de etiquetas, análisis de contexto circundante y alineación semántica de categorías. Si ningún candidato supera el umbral de confianza (`0.35`), el sistema asigna automáticamente la entidad como `NIL`.
 
@@ -35,10 +35,8 @@ Ejecuta el siguiente comando para crear el entorno virtual e instalar automátic
 uv sync
 ```
 
-### 3. Descargar el modelo de lenguaje de SpaCy
-```bash
-uv run python -m spacy download es_core_news_lg
-```
+### 3. Modelo de NER
+No hace falta ningún paso adicional: el modelo de GLiNER (~1 GB) se descarga automáticamente de Hugging Face la primera vez que arranca el servicio y queda en la caché local (`~/.cache/huggingface`). PyTorch se instala en su versión solo CPU (configurada en `pyproject.toml`).
 
 ---
 
@@ -85,7 +83,7 @@ entity-linker/
 │       ├── models/
 │       │   └── schemas.py  # Modelos de datos Pydantic v2 (Request/Response)
 │       └── services/
-│           ├── ner.py          # Extracción de entidades con SpaCy
+│           ├── ner.py          # Extracción de entidades con GLiNER
 │           ├── wikidata.py     # Búsqueda asíncrona en Wikidata + Caché
 │           ├── disambiguator.py# Algoritmo de desambiguación y reglas NIL
 │           └── pipeline.py     # Orquestador del flujo completo
