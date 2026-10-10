@@ -1,3 +1,5 @@
+"""Cliente de Wikidata: búsqueda de candidatos y clases, con caché y reintentos."""
+
 import asyncio
 import json
 import logging
@@ -10,17 +12,22 @@ from urllib.parse import urlencode
 
 import httpx
 
+from entity_linker.config import (
+    CACHE_PATH,
+    SEARCH_LIMIT,
+    USER_AGENT,
+    WIKIDATA_API_URL,
+    WIKIDATA_CONCURRENCY,
+    WIKIDATA_SPARQL_URL,
+    WIKIDATA_TIMEOUT,
+)
 from entity_linker.models.schemas import WikidataCandidate
 
 logger = logging.getLogger(__name__)
 
-API_URL = "https://www.wikidata.org/w/api.php"
-SPARQL_URL = "https://query.wikidata.org/sparql"
 SPARQL_BATCH = 50  # elementos por consulta de clases
-USER_AGENT = "EntityLinker/1.0 (technical_test@example.com) httpx/Python"
 MAX_RETRIES = 5
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
-CACHE_PATH = Path(".cache/wikidata.sqlite")
 
 
 def normalize_mention(text: str) -> str:
@@ -35,8 +42,8 @@ def normalize_mention(text: str) -> str:
 class WikidataService:
     def __init__(
         self,
-        timeout: float = 5.0,
-        max_concurrency: int = 4,
+        timeout: float = WIKIDATA_TIMEOUT,
+        max_concurrency: int = WIKIDATA_CONCURRENCY,
         cache_path: Path | None = CACHE_PATH,
     ):
         # Un cliente compartido (reutiliza conexiones) y concurrencia limitada
@@ -48,8 +55,14 @@ class WikidataService:
         self._resume_at = 0.0  # instante (monotonic) hasta el que no se pide nada
         self._cache = _open_cache(cache_path) if cache_path else None
 
+    async def aclose(self) -> None:
+        """Cierra el cliente HTTP y la caché (al apagar el servicio)."""
+        await self._client.aclose()
+        if self._cache:
+            self._cache.close()
+
     async def get_candidates(
-        self, search_term: str, language: str = "en", limit: int = 20
+        self, search_term: str, language: str = "en", limit: int = SEARCH_LIMIT
     ) -> list[WikidataCandidate]:
         """Busca elementos por etiqueta o alias (búsqueda por prefijo).
 
@@ -88,43 +101,81 @@ class WikidataService:
         ]
 
     async def get_classes(
-        self, qids: list[str]
+        self, qids: list[str], roots: set[str]
     ) -> dict[str, tuple[set[str], set[str]]]:
-        """Clases de cada elemento: (P31 directas, todos sus ancestros vía P279*).
+        """Clases de cada elemento: (P31 directas, raíces de ``roots`` de las que
+        desciende vía P279*).
 
         Las directas sirven para la coherencia entre entidades del documento;
-        los ancestros, para comprobar la compatibilidad con un tipo fino
-        ("Japan national football team" desciende de "sports team").
+        las raíces, para la compatibilidad con un tipo fino ("Japan national
+        football team" desciende de "sports team"). Solo se devuelven las
+        raíces pedidas.
+
+        La caché es por QID (no por consulta): cada elemento se consulta una
+        sola vez aunque llegue en lotes distintos.
         """
-        classes: dict[str, tuple[set[str], set[str]]] = {
-            q: (set(), set()) for q in qids
-        }
-        ordered = sorted(set(qids))  # orden fijo: la misma consulta reusa la caché
-        for i in range(0, len(ordered), SPARQL_BATCH):
-            values = " ".join(f"wd:{q}" for q in ordered[i : i + SPARQL_BATCH])
+        prefix = ",".join(sorted(roots)) + ":"  # otras raíces -> otra entrada
+        classes = {q: self._cached_classes(prefix + q) for q in dict.fromkeys(qids)}
+        missing = sorted(q for q, c in classes.items() if c is None)
+        wanted = ", ".join(f"wd:{r}" for r in sorted(roots))
+        for i in range(0, len(missing), SPARQL_BATCH):
+            batch = missing[i : i + SPARQL_BATCH]
             query = (
-                f"SELECT ?item ?cls ?sup WHERE {{ VALUES ?item {{ {values} }} "
-                "?item wdt:P31 ?cls . ?cls wdt:P279* ?sup }"
+                "SELECT DISTINCT ?item ?cls ?root WHERE { "
+                f"VALUES ?item {{ {' '.join(f'wd:{q}' for q in batch)} }} "
+                "?item wdt:P31 ?cls . OPTIONAL { ?cls wdt:P279* ?root . "
+                f"FILTER(?root IN ({wanted})) }} }}"
             )
             data = await self._get(
-                {"query": query, "format": "json"}, url=SPARQL_URL, timeout=60
+                {"query": query, "format": "json"},
+                url=WIKIDATA_SPARQL_URL,
+                timeout=60,
+                cache=False,  # se cachea cada QID por separado
             )
-            for row in (data or {}).get("results", {}).get("bindings", []):
-                item, cls, sup = (
-                    row[k]["value"].rsplit("/", 1)[-1] for k in ("item", "cls", "sup")
+            if data is None:  # Wikidata no responde: sin clases, sin cachear
+                continue
+            found: dict[str, tuple[set[str], set[str]]] = {
+                q: (set(), set()) for q in batch
+            }
+            for row in data.get("results", {}).get("bindings", []):
+                item = row["item"]["value"].rsplit("/", 1)[-1]
+                found[item][0].add(row["cls"]["value"].rsplit("/", 1)[-1])
+                if "root" in row:
+                    found[item][1].add(row["root"]["value"].rsplit("/", 1)[-1])
+            for q, value in found.items():
+                classes[q] = value
+                body = {"direct": sorted(value[0]), "roots": sorted(value[1])}
+                self._store(prefix + q, body)
+        return {q: c or (set(), set()) for q, c in classes.items()}
+
+    def _cached_classes(self, key: str) -> tuple[set[str], set[str]] | None:
+        if not self._cache:
+            return None
+        row = self._cache.execute(
+            "SELECT body FROM responses WHERE key = ?", (key,)
+        ).fetchone()
+        if row is None:
+            return None
+        body = json.loads(row[0])
+        return set(body["direct"]), set(body["roots"])
+
+    def _store(self, key: str, body: dict[str, Any]) -> None:
+        if self._cache:
+            with self._cache:
+                self._cache.execute(
+                    "INSERT OR REPLACE INTO responses VALUES (?, ?)",
+                    (key, json.dumps(body)),
                 )
-                classes[item][0].add(cls)
-                classes[item][1].add(sup)
-        return classes
 
     async def _get(
         self,
         params: dict[str, Any],
-        url: str = API_URL,
+        url: str = WIKIDATA_API_URL,
         timeout: float | None = None,
+        cache: bool = True,
     ) -> dict[str, Any] | None:
         key = url + "?" + urlencode(sorted(params.items()))
-        if self._cache and (row := self._cache.execute(
+        if cache and self._cache and (row := self._cache.execute(
             "SELECT body FROM responses WHERE key = ?", (key,)
         ).fetchone()):
             return json.loads(row[0])
@@ -143,13 +194,10 @@ class WikidataService:
                         continue
                 if response.status_code not in RETRYABLE_STATUS:
                     response.raise_for_status()
-                    if self._cache:  # solo se cachean respuestas correctas
-                        with self._cache:
-                            self._cache.execute(
-                                "INSERT OR REPLACE INTO responses VALUES (?, ?)",
-                                (key, response.text),
-                            )
-                    return response.json()
+                    data = response.json()
+                    if cache:  # solo se cachean respuestas correctas
+                        self._store(key, data)
+                    return data
             except httpx.TransportError:
                 pass  # red o timeout: se reintenta
             except httpx.HTTPError as exc:
@@ -162,9 +210,8 @@ class WikidataService:
 
 def _open_cache(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    # El servicio se crea al importar la app y FastAPI lo usa desde otro hilo;
-    # es seguro porque todos los accesos ocurren en un único bucle asíncrono
-    db = sqlite3.connect(path, check_same_thread=False)
+    # Se crea en el hilo del bucle de eventos (lifespan de FastAPI)
+    db = sqlite3.connect(path)
     db.execute(
         "CREATE TABLE IF NOT EXISTS responses (key TEXT PRIMARY KEY, body TEXT)"
     )

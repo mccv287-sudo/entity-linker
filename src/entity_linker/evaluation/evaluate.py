@@ -18,14 +18,21 @@ import time
 from pathlib import Path
 from typing import Any
 
-from entity_linker.evaluation.datasets import Document, load_aida
+from entity_linker.config import LLM_MODEL, REVIEW_THRESHOLD
+from entity_linker.evaluation.datasets import (
+    Document,
+    load_aida,
+    load_disambiguation_sample,
+)
 from entity_linker.evaluation.metrics import (
     linking_metrics,
     ner_metrics,
     retrieval_metrics,
 )
-from entity_linker.services.llm_ner import DEFAULT_MODEL, LLMNERError, LLMNERService
-from entity_linker.services.wikidata import WikidataService
+from entity_linker.models.schemas import EntitySpan
+from entity_linker.services.clients.wikidata import WikidataService
+from entity_linker.services.linking.disambiguator import LLMDisambiguatorService
+from entity_linker.services.ner.llm_ner import LLMNERError, LLMNERService
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
@@ -129,6 +136,83 @@ async def evaluate_linking(docs: list[Document], pipeline: Any) -> dict[str, Any
     }
 
 
+def _bucket(gold_rank: int) -> str:
+    return "rank 1" if gold_rank == 1 else "rank 2-10" if gold_rank <= 10 else ">10"
+
+
+async def evaluate_disambiguation(
+    rows: list[dict[str, Any]], disambiguator: Any, use_llm: bool
+) -> dict[str, Any]:
+    """Accuracy del desambiguador por tramo de dificultad (posición del QID
+    correcto entre los candidatos de Wikidata) y validez de su probabilidad.
+
+    ``confident``/``uncertain``: accuracy de las menciones con confianza por
+    encima / por debajo de ``REVIEW_THRESHOLD``; si la probabilidad es útil, la
+    primera debe ser mucho mayor. Agrupa por documento, como el pipeline.
+    """
+    by_doc: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by_doc.setdefault(r["doc_id"], []).append(r)
+
+    calls_before = disambiguator.llm_calls
+    hits: dict[str, list[bool]] = {}
+    start = time.perf_counter()
+    for doc_rows in by_doc.values():
+        spans = [
+            EntitySpan(
+                text=r["mention"],
+                start_char=r["start"],
+                end_char=r["end"],
+                label=r["label"],
+                fine_label=r.get("fine_label"),
+            )
+            for r in doc_rows
+        ]
+        linked = await disambiguator.disambiguate_document(
+            doc_rows[0]["text"],
+            spans,
+            [r["candidates"] for r in doc_rows],
+            use_llm=use_llm,
+        )
+        for r, e in zip(doc_rows, linked):
+            hit = e.qid == r["gold"]
+            hits.setdefault(_bucket(r["gold_rank"]), []).append(hit)
+            confident = e.confidence >= REVIEW_THRESHOLD
+            hits.setdefault("confident" if confident else "uncertain", []).append(hit)
+
+    all_hits = [
+        h for b, bucket in hits.items() if b.startswith(("rank", ">")) for h in bucket
+    ]
+    return {
+        "accuracy": {
+            "all": round(sum(all_hits) / len(all_hits), 3),
+            **{b: round(sum(h) / len(h), 3) for b, h in sorted(hits.items())},
+        },
+        "mentions": {b: len(h) for b, h in sorted(hits.items())},
+        "llm_calls": disambiguator.llm_calls - calls_before,
+        "seconds": round(time.perf_counter() - start, 1),
+    }
+
+
+async def _compare_disambiguation(limit: int | None, llm: bool) -> dict[str, Any]:
+    """Primer candidato vs señales sin red vs +tipo/coherencia vs +LLM."""
+    rows = load_disambiguation_sample()[:limit]
+    first = sum(r["gold_rank"] == 1 for r in rows) / len(rows)
+    print(f"{'1er candidato':26} accuracy {first:.3f}")
+    wikidata = WikidataService()
+    disambiguator = LLMDisambiguatorService(wikidata)
+    configs = {"señales sin red": (False, False), "+tipo+coherencia": (True, False)}
+    if llm:
+        configs["+tipo+coherencia+LLM"] = (True, True)
+    report: dict[str, Any] = {"1er candidato": first}
+    for name, (use_types, use_llm) in configs.items():
+        disambiguator.use_types = use_types
+        report[name] = await evaluate_disambiguation(rows, disambiguator, use_llm)
+        print(f"{name:26} {report[name]}")
+    await wikidata.aclose()
+    return report
+
+
 def print_metrics(metrics: dict[str, dict[str, float | int]]) -> None:
     print(f"  {'':12}{'P':>7}{'R':>7}{'F1':>7}")
     for name, m in metrics.items():
@@ -141,7 +225,7 @@ def _describe(text: str, spans: set[tuple[int, int, str]]) -> list[str]:
 
 def _create_ner(provider: str, args: argparse.Namespace) -> Any:
     if provider == "gliner":
-        from entity_linker.services.ner import NERService  # carga PyTorch
+        from entity_linker.services.ner.gliner import NERService  # carga PyTorch
 
         return NERService(threshold=args.threshold)
     return LLMNERService(model=args.llm_model)
@@ -152,7 +236,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--split", default="test", help="train, validation o test")
     parser.add_argument("--limit", type=int, help="solo los N primeros documentos")
     parser.add_argument(
-        "--stage", choices=["ner", "retrieval", "linking"], default="ner"
+        "--stage",
+        choices=["ner", "retrieval", "linking", "disambiguation"],
+        default="ner",
     )
     parser.add_argument(
         "--llm", action="store_true", help="linking: el LLM resuelve las dudosas"
@@ -162,7 +248,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--threshold", type=float, default=0.5, help="umbral GLiNER")
     parser.add_argument("--candidates", type=int, default=20, help="límite de búsqueda")
-    parser.add_argument("--llm-model", default=DEFAULT_MODEL, help="modelo de Ollama")
+    parser.add_argument("--llm-model", default=LLM_MODEL, help="modelo de Ollama")
     return parser.parse_args()
 
 
@@ -175,6 +261,9 @@ def main() -> None:
         report = asyncio.run(evaluate_retrieval(docs, args.candidates))
         print(report["metrics"])
         name = "retrieval"
+    elif args.stage == "disambiguation":
+        report = asyncio.run(_compare_disambiguation(args.limit, args.llm))
+        name = "disambiguation"
     elif args.stage == "linking":
         from entity_linker.services.pipeline import EntityLinkingPipeline  # GLiNER
 

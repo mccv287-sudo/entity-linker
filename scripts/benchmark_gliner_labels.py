@@ -10,7 +10,7 @@ from pathlib import Path
 
 from entity_linker.evaluation.datasets import load_aida
 from entity_linker.evaluation.evaluate import evaluate_ner, print_metrics
-from entity_linker.services.ner import NERService
+from entity_linker.services.ner.gliner import NERService
 
 LABEL_CONFIGS = {
     "A_broad": {

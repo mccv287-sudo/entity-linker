@@ -17,9 +17,9 @@ import asyncio
 import json
 from collections import Counter
 
-from entity_linker.evaluation.datasets import DATA_DIR, load_aida
-from entity_linker.services.ner import NERService
-from entity_linker.services.wikidata import WikidataService
+from entity_linker.evaluation.datasets import DISAMBIGUATION_SAMPLE, load_aida
+from entity_linker.services.clients.wikidata import WikidataService
+from entity_linker.services.ner.gliner import NERService
 
 CANDIDATES = 20
 
@@ -37,7 +37,8 @@ async def main() -> None:
     mentions = []
     for doc in docs:
         detected = {
-            (e.start_char, e.end_char): e.label for e in ner.extract_entities(doc.text)
+            (e.start_char, e.end_char): (e.label, e.fine_label)
+            for e in ner.extract_entities(doc.text)
         }
         for m in doc.mentions:
             if m.qid and (m.start, m.end) in detected:
@@ -51,10 +52,10 @@ async def main() -> None:
     found = dict(zip(texts, results))
 
     # 3. Se guardan las menciones cuyo QID correcto está entre los candidatos
-    path = DATA_DIR / "disambiguation_aida_test.jsonl"
+    path = DISAMBIGUATION_SAMPLE
     ranks = Counter()
     with path.open("w", encoding="utf-8") as f:
-        for doc, m, label in mentions:
+        for doc, m, (label, fine_label) in mentions:
             text = doc.text[m.start : m.end]
             qids = [c.qid for c in found[text]]
             if m.qid not in qids:
@@ -69,6 +70,7 @@ async def main() -> None:
                 "end": m.end,
                 "mention": text,
                 "label": label,
+                "fine_label": fine_label,
                 "gold": m.qid,
                 "gold_rank": rank,
                 "candidates": [c.model_dump() for c in found[text]],

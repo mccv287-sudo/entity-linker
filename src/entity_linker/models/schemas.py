@@ -1,6 +1,8 @@
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
+
+from entity_linker.config import MAX_CANDIDATES, OUTPUT_CANDIDATES, REVIEW_THRESHOLD
 
 # Tipos reutilizables con sus restricciones
 Qid = Annotated[str, Field(pattern=r"^Q\d+$", description="Identificador de Wikidata")]
@@ -41,35 +43,6 @@ class WikidataCandidate(StrictModel):
     concept_uri: str = Field(..., description="URI completa en Wikidata")
 
 
-class LLMDisambiguationResult(StrictModel):
-    """Salida estructurada que se exige al LLM al desambiguar.
-
-    Se valida desde el JSON del LLM con ``model_validate_json``: un campo con
-    el tipo equivocado (p. ej. ``"0.9"`` como texto) es un error, y el
-    desambiguador recurre a su alternativa.
-    """
-
-    # El LLM puede añadir campos que no se piden; se ignoran
-    model_config = ConfigDict(strict=True, extra="ignore")
-
-    selected_qid: QidOrNil
-    confidence: Confidence
-    is_nil: bool = Field(
-        ..., description="True si la entidad no está en Wikidata o no hay confianza"
-    )
-    reasoning: str = Field(
-        ..., description="Breve explicación del candidato o NIL elegido"
-    )
-
-    @model_validator(mode="after")
-    def _nil_is_consistent(self) -> "LLMDisambiguationResult":
-        # Los LLM pequeños a veces responden selected_qid="NIL" con
-        # is_nil=false: se corrige en lugar de descartar la respuesta
-        if self.selected_qid == "NIL":
-            self.is_nil = True
-        return self
-
-
 class LinkedEntity(EntitySpan):
     qid: QidOrNil = "NIL"
     wikidata_label: str | None = Field(
@@ -85,8 +58,14 @@ class LinkedEntity(EntitySpan):
     reasoning: str | None = Field(
         default=None, description="Motivo de la decisión (LLM o regla aplicada)"
     )
+    needs_review: bool = Field(
+        default=False,
+        description="NIL o confianza baja: conviene que una persona elija entre "
+        "los candidatos",
+    )
     candidates: list[WikidataCandidate] = Field(
-        default_factory=list, description="Candidatos evaluados"
+        default_factory=list,
+        description="Principales candidatos, en el orden usado para decidir",
     )
 
 
@@ -94,8 +73,30 @@ class TextLinkingRequest(BaseModel):
     text: str = Field(
         ...,
         json_schema_extra={
-            "example": "La Universidad Politécnica de Madrid está ubicada en España."
+            "example": "Ada Lovelace worked with Charles Babbage in London."
         },
+    )
+    language: str = Field(
+        default="en",
+        pattern=r"^[a-z]{2,3}$",
+        description="Idioma del texto (ISO 639, p. ej. 'en', 'es'): idioma de "
+        "búsqueda y de etiquetas/descripciones en Wikidata",
+    )
+    use_llm: bool = Field(
+        default=True,
+        description="Resolver las menciones dudosas con el LLM local. False: "
+        "respuesta rápida (~2 s/doc) quedándose con el mejor candidato",
+    )
+    review_threshold: Confidence = Field(
+        default=REVIEW_THRESHOLD,
+        description="Confianza mínima: por debajo (o si es NIL) la entidad se "
+        "marca con needs_review para revisión humana",
+    )
+    max_candidates: int = Field(
+        default=OUTPUT_CANDIDATES,
+        ge=0,
+        le=MAX_CANDIDATES,
+        description="Candidatos devueltos por entidad (0: respuesta compacta)",
     )
 
 

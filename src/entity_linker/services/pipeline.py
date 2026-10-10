@@ -1,29 +1,32 @@
 import asyncio
 import time
 
+from entity_linker.config import OUTPUT_CANDIDATES, REVIEW_THRESHOLD
 from entity_linker.models.schemas import LinkedEntity, TextLinkingResponse
-from entity_linker.services.disambiguator import MAX_CANDIDATES, LLMDisambiguatorService
-from entity_linker.services.entity_types import rerank_by_type
-from entity_linker.services.ner import NERService
-from entity_linker.services.wikidata import WikidataService
+from entity_linker.services.clients.wikidata import WikidataService
+from entity_linker.services.linking.disambiguator import LLMDisambiguatorService
+from entity_linker.services.ner.gliner import NERService
 
 
 class EntityLinkingPipeline:
-    """NER (tipos finos) -> candidatos -> reordenación por tipo -> desambiguación."""
+    """NER (tipos finos) -> candidatos de Wikidata -> desambiguación."""
 
     def __init__(self, use_llm: bool = True, use_types: bool = True):
         """
         Args:
-            use_llm: El LLM resuelve las menciones dudosas.
-            use_types: Reordenar candidatos por tipo fino y coherencia (si es
-                False, se mantiene el orden de Wikidata; sirve para comparar).
+            use_llm: El LLM resuelve las menciones que siguen inciertas.
+            use_types: Señales de tipo fino y coherencia (False: sirve para
+                comparar).
         """
         self.ner_service = NERService()
         self.wikidata_service = WikidataService()
-        self.disambiguator_service = LLMDisambiguatorService(use_llm=use_llm)
-        self.use_types = use_types
+        self.disambiguator_service = LLMDisambiguatorService(
+            self.wikidata_service, use_llm=use_llm, use_types=use_types
+        )
 
-    async def link(self, text: str, language: str = "en") -> list[LinkedEntity]:
+    async def link(
+        self, text: str, language: str = "en", use_llm: bool | None = None
+    ) -> list[LinkedEntity]:
         # 1. NER con tipos finos (fine_label) agrupados en PER/ORG/LOC/MISC
         spans = self.ner_service.extract_entities(text)
 
@@ -35,25 +38,32 @@ class EntityLinkingPipeline:
             )
         )
 
-        # 3. Clases de los candidatos y reordenación por compatibilidad de tipo
-        # (sin clases, ni el tipo ni la coherencia cambian el orden de Wikidata)
-        qids = [c.qid for cands in candidates_list for c in cands[:MAX_CANDIDATES]]
-        classes = (
-            await self.wikidata_service.get_classes(qids) if self.use_types else {}
-        )
-        candidates_list = [
-            rerank_by_type(span.fine_label, cands, classes)
-            for span, cands in zip(spans, candidates_list)
-        ]
-
-        # 4. Desambiguación con coherencia entre las entidades del documento
+        # 3. Desambiguación probabilística (pide las clases solo si hacen falta)
         return await self.disambiguator_service.disambiguate_document(
-            text, spans, candidates_list, classes
+            text, spans, list(candidates_list), use_llm=use_llm
         )
 
-    async def process_text(self, text: str) -> TextLinkingResponse:
+    async def process_text(
+        self,
+        text: str,
+        language: str = "en",
+        use_llm: bool | None = None,
+        review_threshold: float = REVIEW_THRESHOLD,
+        max_candidates: int = OUTPUT_CANDIDATES,
+    ) -> TextLinkingResponse:
+        """Respuesta de la API: entidades enlazadas con la marca de revisión
+        (``needs_review``) según ``review_threshold`` y, como mucho,
+        ``max_candidates`` candidatos por entidad."""
         start_time = time.perf_counter()
-        entities = await self.link(text)
+        entities = [
+            e.model_copy(
+                update={
+                    "needs_review": e.is_nil or e.confidence < review_threshold,
+                    "candidates": e.candidates[:max_candidates],
+                }
+            )
+            for e in await self.link(text, language, use_llm)
+        ]
         return TextLinkingResponse(
             original_text=text,
             entities=entities,

@@ -3,7 +3,6 @@ import json
 
 import httpx
 
-
 SEARCH_URL = "https://wd-vectordb.wmcloud.org/item/query/"
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 

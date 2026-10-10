@@ -3,23 +3,17 @@
 El LLM devuelve el texto y el tipo de cada entidad; las posiciones se calculan
 buscando ese texto en el documento (los LLM no dan offsets fiables). Misma
 interfaz que ``NERService`` para poder compararlos con la misma evaluación.
-
-Requisitos: ``curl -fsSL https://ollama.com/install.sh | sh`` y
-``ollama pull qwen2.5:3b``.
+No forma parte del pipeline: el NER del servicio es GLiNER.
 """
 
-import json
 import re
 
 import httpx
 
+from entity_linker.config import LLM_MODEL, LLM_TIMEOUT, OLLAMA_URL
 from entity_linker.models.schemas import EntitySpan
+from entity_linker.services.clients.ollama import json_request, parse_json_reply
 from entity_linker.services.entity_types import FINE_LABELS
-
-OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
-# 3B cuantizado a 4 bits (~1,9 GB): cabe entero en una GPU de 4 GB. El 7B
-# (~4,7 GB) no cabe, se reparte con la CPU y supera los 100 s por documento
-DEFAULT_MODEL = "qwen2.5:3b"
 
 # Guía de anotación alineada con CoNLL-2003, el esquema contra el que se evalúa
 PROMPT = """Extract all named entities from the text below.
@@ -41,8 +35,7 @@ class LLMNERError(Exception):
 
 
 class LLMNERService:
-    def __init__(self, model: str = DEFAULT_MODEL, timeout: float = 300.0):
-        # Timeout amplio: en CPU un 7B genera ~6 tokens/s
+    def __init__(self, model: str = LLM_MODEL, timeout: float = LLM_TIMEOUT):
         self.model = model
         self._client = httpx.Client(timeout=timeout)
         self.total_input_tokens = 0
@@ -62,23 +55,16 @@ class LLMNERService:
         prompt = PROMPT.format(types=", ".join(labels), text=text)
         try:
             response = self._client.post(
-                OLLAMA_URL,
-                json={
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0,
-                },
+                OLLAMA_URL, json=json_request(self.model, prompt)
             )
             response.raise_for_status()
-            data = response.json()
-            entities = json.loads(data["choices"][0]["message"]["content"])["entities"]
+            reply, tokens_in, tokens_out = parse_json_reply(response.json())
+            entities = reply["entities"]
         except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
             raise LLMNERError(str(exc)) from exc
 
-        usage = data.get("usage", {})
-        self.total_input_tokens += usage.get("prompt_tokens", 0)
-        self.total_output_tokens += usage.get("completion_tokens", 0)
+        self.total_input_tokens += tokens_in
+        self.total_output_tokens += tokens_out
         return self._locate(entities, text, labels)
 
     def _locate(

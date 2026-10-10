@@ -2,19 +2,9 @@
 
 import re
 
+from entity_linker.config import GLINER_MODEL, NER_THRESHOLD
 from entity_linker.models.schemas import EntitySpan
 from entity_linker.services.entity_types import FINE_LABELS
-
-MODEL_NAME = "urchade/gliner_multi-v2.1"
-
-# Etiquetas genéricas: solo como referencia para comparar con los tipos finos
-# (FINE_LABELS, el valor por defecto)
-LABELS = {
-    "person": "PER",
-    "organization": "ORG",
-    "location": "LOC",
-    "miscellaneous entity": "MISC",
-}
 
 # GLiNER procesa ~384 palabras por pasada y descarta el resto: los textos
 # largos se trocean por frases
@@ -23,9 +13,10 @@ _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 class NERService:
-    def __init__(self, model_name: str = MODEL_NAME, threshold: float = 0.5):
-        # Import diferido: PyTorch solo se carga si se usa GLiNER (no al
-        # importar este módulo, p. ej. desde el NER con LLM)
+    def __init__(
+        self, model_name: str = GLINER_MODEL, threshold: float = NER_THRESHOLD
+    ):
+        # Import diferido: PyTorch solo se carga si se usa GLiNER
         from gliner import GLiNER
 
         self.model = GLiNER.from_pretrained(model_name)

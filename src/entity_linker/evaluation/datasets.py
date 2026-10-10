@@ -6,6 +6,8 @@
 - WikiAnc: párrafos de Wikipedia con sus enlaces internos y el QID al que
   apuntan. Solo sirve para retrieval: Wikipedia no enlaza todas las entidades
   y no hay etiqueta de tipo. https://huggingface.co/datasets/cyanic-selkie/wikianc
+- Muestra de desambiguación: menciones de AIDA con NER correcto y QID entre los
+  candidatos, generada con ``scripts/build_disambiguation_sample.py``.
 
 Cada dataset se descarga una vez y se guarda en ``evaluation/data/``.
 """
@@ -19,8 +21,11 @@ from typing import Any
 
 import httpx
 
+from entity_linker.models.schemas import WikidataCandidate
+
 ROWS_URL = "https://datasets-server.huggingface.co/rows"
 DATA_DIR = Path(__file__).parent / "data"
+DISAMBIGUATION_SAMPLE = DATA_DIR / "disambiguation_aida_test.jsonl"
 PAGE_SIZE = 100  # máximo que permite la API de Hugging Face
 DOCS_PER_BLOCK = 10
 
@@ -81,6 +86,17 @@ def load_wikianc(
                 docs += list(by_article.values())[:DOCS_PER_BLOCK]
         _write(path, docs[:n_docs])
     return _read(path)
+
+
+def load_disambiguation_sample() -> list[dict[str, Any]]:
+    """Menciones de AIDA con NER correcto y QID entre los candidatos, con sus
+    candidatos de Wikidata guardados (``scripts/build_disambiguation_sample.py``).
+    """
+    with DISAMBIGUATION_SAMPLE.open(encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f]
+    for r in rows:
+        r["candidates"] = [WikidataCandidate(**c) for c in r["candidates"]]
+    return rows
 
 
 def _aida_document(row: dict[str, Any]) -> Document:
