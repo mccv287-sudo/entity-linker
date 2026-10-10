@@ -1,0 +1,211 @@
+{
+  "split": "test",
+  "provider": "gliner",
+  "threshold": 0.5,
+  "labels": {
+    "person": "PER",
+    "organization": "ORG",
+    "location": "LOC",
+    "miscellaneous entity": "MISC"
+  },
+  "llm_model": null,
+  "llm_base_url": null,
+  "metrics": {
+    "strict": {
+      "precision": 0.5,
+      "recall": 0.2444,
+      "f1": 0.3284,
+      "tp": 11,
+      "fp": 11,
+      "fn": 34
+    },
+    "boundaries": {
+      "precision": 1.0,
+      "recall": 0.4889,
+      "f1": 0.6567,
+      "tp": 22,
+      "fp": 0,
+      "fn": 23
+    },
+    "partial": {
+      "precision": 1.0,
+      "recall": 0.4889,
+      "f1": 0.6567,
+      "tp": 22,
+      "fp": 0,
+      "fn": 23
+    },
+    "LOC": {
+      "precision": 0,
+      "recall": 0.0,
+      "f1": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 20
+    },
+    "MISC": {
+      "precision": 0,
+      "recall": 0.0,
+      "f1": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 12
+    },
+    "ORG": {
+      "precision": 0.0833,
+      "recall": 1.0,
+      "f1": 0.1538,
+      "tp": 1,
+      "fp": 11,
+      "fn": 0
+    },
+    "PER": {
+      "precision": 1.0,
+      "recall": 0.8333,
+      "f1": 0.9091,
+      "tp": 10,
+      "fp": 0,
+      "fn": 2
+    }
+  },
+  "latency_ms": {
+    "median": 1952.85,
+    "p95": 1952.85,
+    "mean": 1953.17
+  },
+  "throughput_docs_per_second": 0.512,
+  "memory": {
+    "unit": "MiB",
+    "process_peak_rss_before": 2976.2,
+    "process_peak_rss_after": 2976.2
+  },
+  "robustness": {
+    "missed_entities": 34,
+    "malformed_spans": 0,
+    "invalid_types": 0,
+    "type_inconsistent": 11,
+    "failed_requests": 0
+  },
+  "errors": [
+    {
+      "doc_id": "1163",
+      "missed": [
+        "JAPAN [LOC]",
+        "CHINA [PER]",
+        "AL-AIN [LOC]",
+        "United Arab Emirates [LOC]",
+        "Japan [LOC]",
+        "Asian Cup [MISC]",
+        "Syria [LOC]",
+        "China [LOC]",
+        "Uzbekistan [LOC]",
+        "China [LOC]",
+        "Uzbek [MISC]",
+        "Chinese [MISC]",
+        "Soviet [MISC]",
+        "Asian Cup [MISC]",
+        "Asian Games [MISC]",
+        "Uzbekistan [LOC]",
+        "Japan [LOC]",
+        "Syria [LOC]",
+        "Syrian [MISC]",
+        "Syria [LOC]",
+        "Bitar [PER]",
+        "Syria [LOC]",
+        "Japan [LOC]",
+        "Syrian [MISC]",
+        "Syrian [MISC]",
+        "Japan [LOC]",
+        "Syrian [MISC]",
+        "Syrians [MISC]",
+        "Japan [LOC]",
+        "World Cup [MISC]",
+        "UAE [LOC]",
+        "Kuwait [LOC]",
+        "South Korea [LOC]",
+        "Indonesia [LOC]"
+      ],
+      "spurious": [
+        "JAPAN [ORG]",
+        "CHINA [ORG]",
+        "Japan [ORG]",
+        "Syria [ORG]",
+        "Uzbekistan [ORG]",
+        "Japan [ORG]",
+        "Japan [ORG]",
+        "Japan [ORG]",
+        "UAE [ORG]",
+        "Kuwait [ORG]",
+        "South Korea [ORG]"
+      ],
+      "type_inconsistent": [
+        {
+          "text": "South Korea",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "JAPAN",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "Syria",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "Japan",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "Japan",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "UAE",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "Kuwait",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "Uzbekistan",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "Japan",
+          "gold": "LOC",
+          "predicted": "ORG"
+        },
+        {
+          "text": "CHINA",
+          "gold": "PER",
+          "predicted": "ORG"
+        },
+        {
+          "text": "Japan",
+          "gold": "LOC",
+          "predicted": "ORG"
+        }
+      ],
+      "malformed_spans": [],
+      "invalid_types": []
+    }
+  ],
+  "ms_per_doc": 1953.17,
+  "runtime": {
+    "provider": "local",
+    "hardware": {
+      "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+      "processor": "x86_64",
+      "logical_cpu_count": 8
+    }
+  }
+}

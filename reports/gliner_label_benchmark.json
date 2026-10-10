@@ -1,0 +1,128 @@
+{
+  "split": "validation",
+  "threshold": 0.5,
+  "results": {
+    "A_broad": {
+      "metrics": {
+        "strict": {
+          "precision": 0.6977,
+          "recall": 0.6122,
+          "f1": 0.6522,
+          "tp": 30,
+          "fp": 13,
+          "fn": 19
+        },
+        "boundaries": {
+          "precision": 1.0,
+          "recall": 0.8776,
+          "f1": 0.9348,
+          "tp": 43,
+          "fp": 0,
+          "fn": 6
+        },
+        "partial": {
+          "precision": 1.0,
+          "recall": 0.8776,
+          "f1": 0.9348,
+          "tp": 43,
+          "fp": 0,
+          "fn": 6
+        },
+        "LOC": {
+          "precision": 0.3333,
+          "recall": 0.625,
+          "f1": 0.4348,
+          "tp": 5,
+          "fp": 10,
+          "fn": 3
+        },
+        "MISC": {
+          "precision": 0,
+          "recall": 0.0,
+          "f1": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 3
+        },
+        "ORG": {
+          "precision": 0.8235,
+          "recall": 0.5833,
+          "f1": 0.6829,
+          "tp": 14,
+          "fp": 3,
+          "fn": 10
+        },
+        "PER": {
+          "precision": 1.0,
+          "recall": 0.7857,
+          "f1": 0.88,
+          "tp": 11,
+          "fp": 0,
+          "fn": 3
+        }
+      },
+      "ms_per_doc": 1762.6
+    },
+    "B_expanded": {
+      "metrics": {
+        "strict": {
+          "precision": 0.7381,
+          "recall": 0.6327,
+          "f1": 0.6813,
+          "tp": 31,
+          "fp": 11,
+          "fn": 18
+        },
+        "boundaries": {
+          "precision": 1.0,
+          "recall": 0.8571,
+          "f1": 0.9231,
+          "tp": 42,
+          "fp": 0,
+          "fn": 7
+        },
+        "partial": {
+          "precision": 1.0,
+          "recall": 0.8571,
+          "f1": 0.9231,
+          "tp": 42,
+          "fp": 0,
+          "fn": 7
+        },
+        "LOC": {
+          "precision": 0.3571,
+          "recall": 0.625,
+          "f1": 0.4545,
+          "tp": 5,
+          "fp": 9,
+          "fn": 3
+        },
+        "MISC": {
+          "precision": 0,
+          "recall": 0.0,
+          "f1": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 3
+        },
+        "ORG": {
+          "precision": 0.8824,
+          "recall": 0.625,
+          "f1": 0.7317,
+          "tp": 15,
+          "fp": 2,
+          "fn": 9
+        },
+        "PER": {
+          "precision": 1.0,
+          "recall": 0.7857,
+          "f1": 0.88,
+          "tp": 11,
+          "fp": 0,
+          "fn": 3
+        }
+      },
+      "ms_per_doc": 1725.8
+    }
+  }
+}

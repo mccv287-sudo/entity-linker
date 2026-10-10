@@ -1,0 +1,51 @@
+{
+  "settings": {
+    "split": "test",
+    "limit": null,
+    "stage": "disambiguation",
+    "llm": false,
+    "provider": "gliner",
+    "threshold": 0.5,
+    "candidates": 20,
+    "llm_model": "qwen2.5:3b"
+  },
+  "1er candidato": 0.6357012750455373,
+  "señales sin red": {
+    "accuracy": {
+      "all": 0.607,
+      ">10": 0.0,
+      "confident": 0.76,
+      "rank 1": 0.943,
+      "rank 2-10": 0.026,
+      "uncertain": 0.363
+    },
+    "mentions": {
+      ">10": 44,
+      "confident": 337,
+      "rank 1": 349,
+      "rank 2-10": 156,
+      "uncertain": 212
+    },
+    "llm_calls": 0,
+    "seconds": 0.1
+  },
+  "+tipo+coherencia": {
+    "accuracy": {
+      "all": 0.641,
+      ">10": 0.0,
+      "confident": 0.722,
+      "rank 1": 0.986,
+      "rank 2-10": 0.051,
+      "uncertain": 0.239
+    },
+    "mentions": {
+      ">10": 44,
+      "confident": 457,
+      "rank 1": 349,
+      "rank 2-10": 156,
+      "uncertain": 92
+    },
+    "llm_calls": 0,
+    "seconds": 521.9
+  }
+}

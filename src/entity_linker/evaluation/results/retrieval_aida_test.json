@@ -1,0 +1,186 @@
+{
+  "settings": {
+    "split": "test",
+    "limit": 1,
+    "stage": "retrieval",
+    "provider": "gliner",
+    "threshold": 0.5,
+    "candidates": 20,
+    "llm_model": "qwen2.5:7b",
+    "llm_base_url": "http://localhost:11434/v1"
+  },
+  "metrics": {
+    "recall@1": 0.2632,
+    "recall@5": 0.3947,
+    "recall@all": 0.6053,
+    "mrr": 0.3359,
+    "no_candidates": 0.0
+  },
+  "errors": [
+    {
+      "mention": "JAPAN",
+      "gold": "Q170566",
+      "candidates": [
+        "Q17",
+        "Q5287",
+        "Q188712",
+        "Q205662",
+        "Q177837"
+      ]
+    },
+    {
+      "mention": "Japan",
+      "gold": "Q170566",
+      "candidates": [
+        "Q17",
+        "Q5287",
+        "Q188712",
+        "Q205662",
+        "Q177837"
+      ]
+    },
+    {
+      "mention": "Asian Cup",
+      "gold": "Q369539",
+      "candidates": [
+        "Q727021",
+        "Q727359",
+        "Q729106",
+        "Q312249",
+        "Q2035243"
+      ]
+    },
+    {
+      "mention": "Syria",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q3509007",
+        "Q21441670",
+        "Q20001455",
+        "Q3076765"
+      ]
+    },
+    {
+      "mention": "Chinese",
+      "gold": "Q148",
+      "candidates": [
+        "Q7850",
+        "Q30239",
+        "Q12857515",
+        "Q727694",
+        "Q865"
+      ]
+    },
+    {
+      "mention": "Japan",
+      "gold": "Q170566",
+      "candidates": [
+        "Q17",
+        "Q5287",
+        "Q188712",
+        "Q205662",
+        "Q177837"
+      ]
+    },
+    {
+      "mention": "Syria",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q3509007",
+        "Q21441670",
+        "Q20001455",
+        "Q3076765"
+      ]
+    },
+    {
+      "mention": "Syrian",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q204175",
+        "Q648464",
+        "Q469482",
+        "Q943676"
+      ]
+    },
+    {
+      "mention": "Syria",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q3509007",
+        "Q21441670",
+        "Q20001455",
+        "Q3076765"
+      ]
+    },
+    {
+      "mention": "Syria",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q3509007",
+        "Q21441670",
+        "Q20001455",
+        "Q3076765"
+      ]
+    },
+    {
+      "mention": "Japan",
+      "gold": "Q170566",
+      "candidates": [
+        "Q17",
+        "Q5287",
+        "Q188712",
+        "Q205662",
+        "Q177837"
+      ]
+    },
+    {
+      "mention": "Syrian",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q204175",
+        "Q648464",
+        "Q469482",
+        "Q943676"
+      ]
+    },
+    {
+      "mention": "Syrian",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q204175",
+        "Q648464",
+        "Q469482",
+        "Q943676"
+      ]
+    },
+    {
+      "mention": "Japan",
+      "gold": "Q170566",
+      "candidates": [
+        "Q17",
+        "Q5287",
+        "Q188712",
+        "Q205662",
+        "Q177837"
+      ]
+    },
+    {
+      "mention": "Syrian",
+      "gold": "Q272097",
+      "candidates": [
+        "Q858",
+        "Q204175",
+        "Q648464",
+        "Q469482",
+        "Q943676"
+      ]
+    }
+  ]
+}

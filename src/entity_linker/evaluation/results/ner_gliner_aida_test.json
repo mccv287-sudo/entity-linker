@@ -1,0 +1,127 @@
+{
+  "settings": {
+    "split": "test",
+    "limit": 1,
+    "stage": "ner",
+    "provider": "gliner",
+    "threshold": 0.5,
+    "candidates": 20,
+    "llm_model": "qwen2.5:7b",
+    "llm_base_url": "http://localhost:11434/v1"
+  },
+  "gliner": {
+    "metrics": {
+      "strict": {
+        "precision": 0.5,
+        "recall": 0.2444,
+        "f1": 0.3284,
+        "tp": 11,
+        "fp": 11,
+        "fn": 34
+      },
+      "boundaries": {
+        "precision": 1.0,
+        "recall": 0.4889,
+        "f1": 0.6567,
+        "tp": 22,
+        "fp": 0,
+        "fn": 23
+      },
+      "partial": {
+        "precision": 1.0,
+        "recall": 0.4889,
+        "f1": 0.6567,
+        "tp": 22,
+        "fp": 0,
+        "fn": 23
+      },
+      "LOC": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0,
+        "tp": 0,
+        "fp": 0,
+        "fn": 20
+      },
+      "MISC": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0,
+        "tp": 0,
+        "fp": 0,
+        "fn": 12
+      },
+      "ORG": {
+        "precision": 0.0833,
+        "recall": 1.0,
+        "f1": 0.1538,
+        "tp": 1,
+        "fp": 11,
+        "fn": 0
+      },
+      "PER": {
+        "precision": 1.0,
+        "recall": 0.8333,
+        "f1": 0.9091,
+        "tp": 10,
+        "fp": 0,
+        "fn": 2
+      }
+    },
+    "ms_per_doc": 1694.4,
+    "errors": [
+      {
+        "doc_id": "1163",
+        "missed": [
+          "JAPAN [LOC]",
+          "CHINA [PER]",
+          "AL-AIN [LOC]",
+          "United Arab Emirates [LOC]",
+          "Japan [LOC]",
+          "Asian Cup [MISC]",
+          "Syria [LOC]",
+          "China [LOC]",
+          "Uzbekistan [LOC]",
+          "China [LOC]",
+          "Uzbek [MISC]",
+          "Chinese [MISC]",
+          "Soviet [MISC]",
+          "Asian Cup [MISC]",
+          "Asian Games [MISC]",
+          "Uzbekistan [LOC]",
+          "Japan [LOC]",
+          "Syria [LOC]",
+          "Syrian [MISC]",
+          "Syria [LOC]",
+          "Bitar [PER]",
+          "Syria [LOC]",
+          "Japan [LOC]",
+          "Syrian [MISC]",
+          "Syrian [MISC]",
+          "Japan [LOC]",
+          "Syrian [MISC]",
+          "Syrians [MISC]",
+          "Japan [LOC]",
+          "World Cup [MISC]",
+          "UAE [LOC]",
+          "Kuwait [LOC]",
+          "South Korea [LOC]",
+          "Indonesia [LOC]"
+        ],
+        "spurious": [
+          "JAPAN [ORG]",
+          "CHINA [ORG]",
+          "Japan [ORG]",
+          "Syria [ORG]",
+          "Uzbekistan [ORG]",
+          "Japan [ORG]",
+          "Japan [ORG]",
+          "Japan [ORG]",
+          "UAE [ORG]",
+          "Kuwait [ORG]",
+          "South Korea [ORG]"
+        ]
+      }
+    ]
+  }
+}
