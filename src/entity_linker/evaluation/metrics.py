@@ -68,7 +68,7 @@ def linking_metrics(
 
 
 def retrieval_metrics(
-    gold_qids: list[str], candidates: list[list[str]], ks: tuple[int, ...] = (1, 5)
+    gold_qids: list[str], candidates: list[list[str]], ks: tuple[int, ...] = (1, 5, 10)
 ) -> dict[str, float]:
     """Calidad de la lista de candidatos de cada mención (un QID correcto).
 

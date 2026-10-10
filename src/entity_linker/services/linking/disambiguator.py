@@ -35,6 +35,7 @@ from entity_linker.services.linking.scoring import (
     coherence_score,
     context_score,
     probabilities,
+    surroundings,
     type_score,
 )
 
@@ -96,15 +97,17 @@ class LLMDisambiguatorService:
         """
         use_llm = self.use_llm if use_llm is None else use_llm
         candidates_list = [c[:MAX_CANDIDATES] for c in candidates_list]
+        # Con la mención, para el prompt del LLM
         contexts = [
             text[max(0, s.start_char - CONTEXT_CHARS) : s.end_char + CONTEXT_CHARS]
             for s in spans
         ]
 
-        # 1. Señales sin red
+        # 1. Señales sin red (el contexto, sin la mención)
+        around = [surroundings(text, s.start_char, s.end_char) for s in spans]
         signals = [
-            [{"context": context_score(c, ctx)} for c in cands]
-            for cands, ctx in zip(candidates_list, contexts)
+            [{"context": context_score(c, ctx, s.text)} for c in cands]
+            for s, cands, ctx in zip(spans, candidates_list, around)
         ]
         probs = [probabilities(sig) for sig in signals]
         uncertain = [bool(p) and max(p) < CONFIDENT_PROB for p in probs]

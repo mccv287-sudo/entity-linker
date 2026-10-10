@@ -1,24 +1,28 @@
 """Señales de desambiguación y probabilidad de cada candidato.
 
 Cada señal vale entre 0 y 1; se combinan linealmente (``WEIGHTS``) y un softmax
-sobre los candidatos de una mención da su probabilidad:
+sobre los candidatos de una mención da su probabilidad (un logit condicional):
 
 - ``prior``: relevancia según la búsqueda de Wikidata (1 / posición), que
   aproxima la popularidad del sentido. Se calcula a partir del orden.
-- ``context``: palabras de la descripción del candidato cerca de la mención.
+- ``context``: palabras de la descripción del candidato cerca de la mención
+  (sin contar las de la propia mención: la similitud de nombre ya está en
+  ``prior``, porque Wikidata busca por etiqueta y alias).
 - ``type``: compatibilidad con el tipo fino del NER (clases P31/P279*).
 - ``coherence``: clases compartidas con las entidades ya resueltas del documento.
 - ``llm``: 1 para el candidato que elige el LLM (si se le consulta).
 
-Los pesos se eligieron por búsqueda en rejilla sobre 13 documentos de la
-muestra de AIDA y se validaron en otros 17. La similitud de nombre se
-descartó: con homónimos que se llaman igual, su peso óptimo era 0.
+Los pesos se aprenden por máxima verosimilitud sobre 13 documentos de la
+muestra de AIDA y se validan en otros 17 (``scripts/tune_weights.py``). La
+similitud de nombre se descartó: con homónimos que se llaman igual, su peso
+óptimo era 0.
 """
 
-import math
 import re
 
-from entity_linker.config import WEIGHTS
+from scipy.special import softmax
+
+from entity_linker.config import CONTEXT_CHARS, WEIGHTS
 from entity_linker.models.schemas import WikidataCandidate
 from entity_linker.services.entity_types import FINE_TYPE_CLASSES, Classes
 
@@ -26,11 +30,22 @@ _WORD = re.compile(r"[a-záéíóúüñ]{4,}")
 _NO_CLASSES: tuple[set[str], set[str]] = (set(), set())
 
 
-def context_score(cand: WikidataCandidate, context: str) -> float:
+def surroundings(text: str, start: int, end: int) -> str:
+    """Texto alrededor de la mención (``CONTEXT_CHARS`` a cada lado), sin la
+    propia mención."""
+    return text[max(0, start - CONTEXT_CHARS) : start] + text[end : end + CONTEXT_CHARS]
+
+
+def context_score(cand: WikidataCandidate, context: str, mention: str) -> float:
     """Fracción de palabras de la descripción del candidato que aparecen cerca
-    de la mención ("football club" en una noticia de fútbol)."""
-    words = _words(cand.description or "")
-    return len(words & _words(context)) / len(words) if words else 0.0
+    de la mención ("football club" en una noticia de fútbol).
+
+    Las palabras de la mención no cuentan ni en el contexto ni en la
+    descripción: que la descripción repita el nombre ("Nobel Prize in Physics
+    controversies") es similitud de nombre, no de contexto."""
+    name = _words(mention)
+    words = _words(cand.description or "") - name
+    return len(words & (_words(context) - name)) / len(words) if words else 0.0
 
 
 def type_score(fine_label: str | None, qid: str, classes: Classes) -> float:
@@ -63,9 +78,7 @@ def probabilities(signals: list[dict[str, float]]) -> list[float]:
         + sum(WEIGHTS[name] * value for name, value in sig.items())
         for rank, sig in enumerate(signals)
     ]
-    top = max(scores)
-    exps = [math.exp(s - top) for s in scores]
-    return [e / sum(exps) for e in exps]
+    return softmax(scores).tolist()
 
 
 def argmax(values: list[float]) -> int:

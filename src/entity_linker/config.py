@@ -43,13 +43,13 @@ LLM_TIMEOUT = 300.0
 MAX_CANDIDATES = 10  # candidatos que se puntúan y se muestran al LLM
 CONTEXT_CHARS = 300  # ventana de contexto a cada lado de la mención
 CONFIDENT_PROB = 0.7  # por encima, la mención no necesita más señales
-# Pesos de las señales: elegidos en rejilla sobre 13 documentos de AIDA y
-# validados en otros 17 (ver services/linking/scoring.py)
+# Pesos de las señales: aprendidos en 13 documentos de AIDA y validados en
+# otros 17 (scripts/tune_weights.py). El de llm se fija a mano
 WEIGHTS = {
-    "prior": 2.0,
-    "context": 2.0,
-    "type": 1.0,
-    "coherence": 1.0,
+    "prior": 2.59,
+    "context": 5.84,
+    "type": 1.63,
+    "coherence": 7.95,
     "llm": 4.0,
 }
 
