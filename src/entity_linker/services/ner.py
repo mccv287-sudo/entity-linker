@@ -1,72 +1,63 @@
-"""Reconocimiento de entidades con dos implementaciones intercambiables.
-
-Ambas devuelven ``EntitySpan`` con las mismas cuatro etiquetas (PER, ORG, LOC,
-MISC), así que el resto del pipeline no depende de cuál se use. Se elige con
-``create_ner_service("gliner" | "spacy")``.
-"""
+"""Reconocimiento de entidades con GLiNER (zero-shot)."""
 
 import re
-from typing import Literal, Protocol
 
 from entity_linker.models.schemas import EntitySpan
+from entity_linker.services.entity_types import FINE_LABELS
 
-NERBackend = Literal["gliner", "spacy"]
+MODEL_NAME = "urchade/gliner_multi-v2.1"
 
-
-class NERService(Protocol):
-    def extract_entities(self, text: str) -> list[EntitySpan]: ...
-
-
-# --- GLiNER --------------------------------------------------------------------
-
-GLINER_MODEL = "urchade/gliner_multi-v2.1"
-
-# GLiNER reconoce las etiquetas que se le pidan (zero-shot). Se le piden en
-# inglés, con las que da puntuaciones más altas también en textos en español,
-# y se agrupan en las cuatro categorías que usa el resto del pipeline.
-GLINER_LABELS = {
+# Etiquetas genéricas: solo como referencia para comparar con los tipos finos
+# (FINE_LABELS, el valor por defecto)
+LABELS = {
     "person": "PER",
     "organization": "ORG",
     "location": "LOC",
-    "work of art": "MISC",
-    "event": "MISC",
+    "miscellaneous entity": "MISC",
 }
 
-# El modelo procesa como máximo ~384 palabras por pasada y descarta el resto,
-# así que los textos largos se trocean por frases
+# GLiNER procesa ~384 palabras por pasada y descarta el resto: los textos
+# largos se trocean por frases
 MAX_CHUNK_CHARS = 1500
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
-class GLiNERService:
-    def __init__(self, model_name: str = GLINER_MODEL, threshold: float = 0.5):
-        # Import diferido: carga PyTorch, innecesario si se usa spaCy
+class NERService:
+    def __init__(self, model_name: str = MODEL_NAME, threshold: float = 0.5):
+        # Import diferido: PyTorch solo se carga si se usa GLiNER (no al
+        # importar este módulo, p. ej. desde el NER con LLM)
         from gliner import GLiNER
 
         self.model = GLiNER.from_pretrained(model_name)
         self.threshold = threshold
 
-    def extract_entities(self, text: str) -> list[EntitySpan]:
+    def extract_entities(
+        self, text: str, labels: dict[str, str] | None = None
+    ) -> list[EntitySpan]:
+        """Detecta entidades; ``labels`` (tipo pedido -> etiqueta CoNLL) permite
+        probar otros prompts. Por defecto, los tipos finos (``FINE_LABELS``)."""
+        labels = labels or FINE_LABELS
         entities = []
         for offset, chunk in _chunks(text):
-            predictions = self.model.predict_entities(
-                chunk, list(GLINER_LABELS), threshold=self.threshold
-            )
-            for pred in predictions:
+            for pred in self.model.predict_entities(
+                chunk, list(labels), threshold=self.threshold
+            ):
+                start, end = offset + pred["start"], offset + pred["end"]
                 entities.append(
                     EntitySpan(
-                        text=pred["text"],
-                        start_char=offset + int(pred["start"]),
-                        end_char=offset + int(pred["end"]),
-                        label=GLINER_LABELS[pred["label"]],
+                        text=text[start:end],
+                        start_char=start,
+                        end_char=end,
+                        label=labels[pred["label"]],
+                        fine_label=pred["label"],
                     )
                 )
         return entities
 
 
 def _chunks(text: str) -> list[tuple[int, str]]:
-    """Divide el texto en trozos de frases completas con su posición inicial."""
-    chunks: list[tuple[int, str]] = []
+    """Trozos de frases completas, con su posición en el texto original."""
+    chunks = []
     start = 0
     for match in _SENTENCE_END.finditer(text):
         if match.start() - start > MAX_CHUNK_CHARS:
@@ -74,42 +65,3 @@ def _chunks(text: str) -> list[tuple[int, str]]:
             start = match.end()
     chunks.append((start, text[start:]))
     return chunks
-
-
-# --- spaCy ---------------------------------------------------------------------
-
-# Se usa el primer modelo instalado de la lista
-SPACY_MODELS = ("es_core_news_lg", "es_core_news_md", "es_core_news_sm")
-SPACY_LABELS = {"PER", "ORG", "LOC", "MISC"}
-
-
-class SpacyNERService:
-    def __init__(self, model_names: tuple[str, ...] = SPACY_MODELS):
-        import spacy
-
-        for name in model_names:
-            try:
-                self.nlp = spacy.load(name)
-                break
-            except OSError:
-                continue
-        else:
-            raise OSError(f"No hay ningún modelo de spaCy instalado: {model_names}")
-
-    def extract_entities(self, text: str) -> list[EntitySpan]:
-        return [
-            EntitySpan(
-                text=ent.text,
-                start_char=ent.start_char,
-                end_char=ent.end_char,
-                label=ent.label_,
-            )
-            for ent in self.nlp(text).ents
-            if ent.label_ in SPACY_LABELS
-        ]
-
-
-def create_ner_service(backend: NERBackend = "gliner") -> NERService:
-    if backend == "spacy":
-        return SpacyNERService()
-    return GLiNERService()

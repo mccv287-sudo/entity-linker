@@ -9,21 +9,22 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "es-core-news-sm",
     "fastapi>=0.142.2",
     "gliner>=0.2.29",
     "httpx>=0.28.1",
+    "nervaluate>=1.2.1",
     "protobuf>=7.36.2",
     "pydantic>=2.13.5",
     "python-dotenv>=1.2.4",
+    "ranx>=0.3.21",
     "sentencepiece>=0.2.2",
-    "spacy>=3.8.16",
     "torch>=2.14.1",
     "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
+    "ipykernel>=7.4.0",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
@@ -44,4 +45,3 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
-es-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.8.0/es_core_news_sm-3.8.0-py3-none-any.whl" }

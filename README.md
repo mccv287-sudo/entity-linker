@@ -75,8 +75,6 @@ entity-linker/
 ├── uv.lock                 # Lockfile estricto de dependencias
 ├── README.md               # Documentación principal
 ├── .github/
-│   └── workflows/
-│       └── ci.yml          # Pipeline de Integración Continua (GitHub Actions)
 ├── src/
 │   └── entity_linker/
 │       ├── main.py         # Punto de entrada FastAPI y definición de endpoints

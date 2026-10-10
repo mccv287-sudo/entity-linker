@@ -1,37 +1,85 @@
-"""
-Service for entity disambiguation using a hybrid Fast-Path + LLM approach.
-Integrates fine-grained GLiNER entities with Wikidata candidates and LLM reasoning.
+"""Desambiguación: primer candidato de Wikidata + LLM local solo para casos dudosos.
+
+1. Sin candidatos -> NIL.
+2. Criterio de incertidumbre (``is_ambiguous``): si la mención no es dudosa, se
+   acepta el primer candidato (ya reordenado por tipo fino, ver entity_types).
+3. Si es dudosa, un LLM local (Ollama) elige entre los primeros candidatos con
+   una ventana de contexto y las entidades ya resueltas del documento
+   (coherencia barata). Solo devuelve el número del candidato: en CPU el coste
+   lo marcan los tokens. Con ``use_llm=False`` se queda con el primero tras
+   reordenar por coherencia.
+4. Si el LLM falla, se vuelve al primer candidato.
 """
 
+import asyncio
+import json
 import logging
 
 import httpx
 
-from entity_linker.models.schemas import (
-    LinkedEntity,
-    LLMDisambiguationResult,
-    WikidataCandidate,
-)
+from entity_linker.models.schemas import EntitySpan, LinkedEntity, WikidataCandidate
+from entity_linker.services.entity_types import Classes, rerank_by_coherence
+from entity_linker.services.llm_ner import DEFAULT_MODEL, OLLAMA_URL
+from entity_linker.services.wikidata import normalize_mention
 
 logger = logging.getLogger(__name__)
 
+CONTEXT_CHARS = 300  # caracteres a cada lado de la mención
+MAX_CANDIDATES = 10  # candidatos que se muestran al LLM
+MAX_DESCRIPTION = 100
+
+# Confianza fija por vía de decisión (no hay una probabilidad calibrada)
+CONFIDENCE = {"top": 0.9, "llm": 0.7, "coherence": 0.6, "fallback": 0.5}
+
+PROMPT = """Which Wikidata entity does the mention refer to in this text?
+
+Text: "...{context}..."
+Other entities in the document: {document_entities}
+Mention: "{mention}" (type: {label})
+
+Candidates:
+{candidates}
+
+Answer only with JSON: {{"choice": <candidate number, or 0 if none fits>}}"""
+
+
+def is_ambiguous(mention: str, candidates: list[WikidataCandidate]) -> bool:
+    """Mención dudosa: el primer candidato no se llama como la mención, o hay
+    varios candidatos que se llaman igual (homónimos).
+
+    No usa el gold: es aplicable en producción.
+    """
+    name = normalize_mention(mention).lower()
+    same_name = [c for c in candidates if c.label.lower() == name]
+    return candidates[0].label.lower() != name or len(same_name) > 1
+
 
 class LLMDisambiguatorService:
-    """Hybrid Entity Disambiguator combining heuristic fast-paths with LLM reasoning."""
-
     def __init__(
         self,
-        llm_api_url: str = "http://localhost:11434/v1/chat/completions",
-        model_name: str = "llama3.2:3b",
-        api_key: str = "not-needed",
-        confidence_threshold: float = 0.35,
-        timeout_seconds: float = 3.0,
-    ) -> None:
-        self.llm_api_url = llm_api_url
-        self.model_name = model_name
-        self.api_key = api_key
-        self.confidence_threshold = confidence_threshold
-        self.timeout_seconds = timeout_seconds
+        model: str = DEFAULT_MODEL,
+        timeout: float = 300.0,
+        use_gate: bool = True,
+        use_llm: bool = True,
+    ):
+        """
+        Args:
+            model: Modelo de Ollama.
+            timeout: Segundos por llamada (en CPU un 7B procesa ~17 tokens/s).
+            use_gate: Si es False, el LLM decide todas las menciones (para
+                medir qué aporta el criterio de incertidumbre).
+            use_llm: Si es False, las dudosas se resuelven solo con tipo y
+                coherencia (evaluación end-to-end barata).
+        """
+        self.model = model
+        self.timeout = timeout
+        self.use_gate = use_gate
+        self.use_llm = use_llm
+        # Ollama procesa una petición a la vez: se encolan aquí, no en su cola
+        self._semaphore = asyncio.Semaphore(1)
+        self.llm_calls = 0
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
 
     async def disambiguate(
         self,
@@ -41,162 +89,134 @@ class LLMDisambiguatorService:
         end_char: int,
         entity_label: str,
         candidates: list[WikidataCandidate],
+        document_entities: list[str] | None = None,
+        fine_label: str | None = None,
     ) -> LinkedEntity:
-        """Disambiguates an entity span against Wikidata candidates using Fast-Path or LLM."""
+        """Elige el QID de la mención entre los candidatos, o NIL.
 
-        # 1. Edge case: No candidates found in Wikidata
+        ``document_entities``: entidades ya resueltas del documento, que el LLM
+        usa como contexto (coherencia). ``fine_label``: tipo fino del NER, más
+        informativo para el LLM que la etiqueta CoNLL ("sports team" frente a
+        "ORG"); se devuelve también en la salida.
+        """
+
+        def linked(
+            cand: WikidataCandidate | None, confidence: float, reason: str
+        ) -> LinkedEntity:
+            return LinkedEntity(
+                text=entity_text,
+                start_char=start_char,
+                end_char=end_char,
+                label=entity_label,
+                fine_label=fine_label,
+                qid=cand.qid if cand else "NIL",
+                wikidata_label=cand.label if cand else None,
+                wikidata_description=cand.description if cand else None,
+                confidence=confidence,
+                is_nil=cand is None,
+                reasoning=reason,
+                candidates=candidates,
+            )
+
         if not candidates:
-            return LinkedEntity(
-                text=entity_text,
-                start_char=start_char,
-                end_char=end_char,
-                label=entity_label,
-                qid="NIL",
-                confidence=0.0,
-                is_nil=True,
-                reasoning="No candidates returned from Wikidata search API.",
-            )
+            return linked(None, 0.0, "Sin candidatos en Wikidata")
+        if self.use_gate and not is_ambiguous(entity_text, candidates):
+            return linked(candidates[0], CONFIDENCE["top"], "No ambigua: 1er candidato")
+        if not self.use_llm:
+            return linked(candidates[0], CONFIDENCE["coherence"], "Dudosa: sin LLM")
 
-        # 2. Fast-Path: Single candidate with exact match
-        if len(candidates) == 1:
-            candidate = candidates[0]
-            if candidate.label.lower() == entity_text.lower():
-                return LinkedEntity(
-                    text=entity_text,
-                    start_char=start_char,
-                    end_char=end_char,
-                    label=entity_label,
-                    qid=candidate.qid,
-                    wikidata_label=candidate.label,
-                    wikidata_description=candidate.description,
-                    confidence=0.95,
-                    is_nil=False,
-                    reasoning="Fast-path: Single candidate with exact name match.",
-                    candidates=candidates,
-                )
-
-        # 3. LLM Disambiguation Path
+        shown = candidates[:MAX_CANDIDATES]
+        context = context_text[
+            max(0, start_char - CONTEXT_CHARS) : end_char + CONTEXT_CHARS
+        ]
         try:
-            llm_result = await self._call_llm_disambiguator(
-                context_text=context_text,
-                entity_text=entity_text,
-                entity_label=entity_label,
-                candidates=candidates,
+            choice = await self._ask_llm(
+                context,
+                entity_text,
+                fine_label or entity_label,
+                shown,
+                document_entities or [],
             )
+        except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
+            logger.warning("LLM falló para %r: %s", entity_text, exc)
+            return linked(candidates[0], CONFIDENCE["fallback"], "LLM falló")
+        if not 1 <= choice <= len(shown):
+            return linked(None, 0.0, "LLM: ningún candidato encaja")
+        return linked(shown[choice - 1], CONFIDENCE["llm"], f"LLM: candidato {choice}")
 
-            chosen_candidate = next(
-                (c for c in candidates if c.qid == llm_result.selected_qid), None
-            )
+    async def disambiguate_document(
+        self,
+        text: str,
+        spans: list[EntitySpan],
+        candidates_list: list[list[WikidataCandidate]],
+        classes: Classes,
+    ) -> list[LinkedEntity]:
+        """Desambigua todas las menciones de un documento en dos pasadas.
 
-            if (
-                llm_result.is_nil
-                or not chosen_candidate
-                or llm_result.confidence < self.confidence_threshold
-            ):
-                return LinkedEntity(
-                    text=entity_text,
-                    start_char=start_char,
-                    end_char=end_char,
-                    label=entity_label,
-                    qid="NIL",
-                    confidence=llm_result.confidence,
-                    is_nil=True,
-                    reasoning=llm_result.reasoning,
-                    candidates=candidates,
+        1. Menciones no dudosas: primer candidato.
+        2. Menciones dudosas: candidatos reordenados por coherencia con las ya
+           resueltas, que además se pasan al LLM como contexto.
+        """
+        dubious = [
+            bool(c) and is_ambiguous(s.text, c) for s, c in zip(spans, candidates_list)
+        ]
+        results: list[LinkedEntity | None] = [None] * len(spans)
+        for i, (span, cands) in enumerate(zip(spans, candidates_list)):
+            if not dubious[i]:
+                results[i] = await self.disambiguate(
+                    text, span.text, span.start_char, span.end_char, span.label,
+                    cands, fine_label=span.fine_label,
                 )
 
-            return LinkedEntity(
-                text=entity_text,
-                start_char=start_char,
-                end_char=end_char,
-                label=entity_label,
-                qid=chosen_candidate.qid,
-                wikidata_label=chosen_candidate.label,
-                wikidata_description=chosen_candidate.description,
-                confidence=llm_result.confidence,
-                is_nil=False,
-                reasoning=llm_result.reasoning,
-                candidates=candidates,
-            )
+        resolved = [r for r in results if r is not None and not r.is_nil]
+        resolved_qids = [r.qid for r in resolved]
+        names = list(dict.fromkeys(r.wikidata_label or r.text for r in resolved))
+        for i, (span, cands) in enumerate(zip(spans, candidates_list)):
+            if dubious[i]:
+                cands = rerank_by_coherence(
+                    span.fine_label, cands, resolved_qids, classes
+                )
+                results[i] = await self.disambiguate(
+                    text, span.text, span.start_char, span.end_char, span.label,
+                    cands, document_entities=names[:MAX_CANDIDATES],
+                    fine_label=span.fine_label,
+                )
+        return [r for r in results if r is not None]
 
-        except Exception as exc:
-            logger.warning(
-                f"LLM disambiguation failed/timed out for '{entity_text}': {exc}. Falling back to top candidate."
-            )
-            top_cand = candidates[0]
-            return LinkedEntity(
-                text=entity_text,
-                start_char=start_char,
-                end_char=end_char,
-                label=entity_label,
-                qid=top_cand.qid,
-                wikidata_label=top_cand.label,
-                wikidata_description=top_cand.description,
-                confidence=0.5,
-                is_nil=False,
-                reasoning="Fallback: Top candidate chosen due to LLM timeout/error.",
-                candidates=candidates,
-            )
-
-    async def _call_llm_disambiguator(
+    async def _ask_llm(
         self,
-        context_text: str,
-        entity_text: str,
-        entity_label: str,
+        context: str,
+        mention: str,
+        label: str,
         candidates: list[WikidataCandidate],
-    ) -> LLMDisambiguationResult:
-        """Sends prompt to OpenAI/Ollama compatible API requesting JSON output."""
-
-        candidates_formatted = "\n".join(
-            [
-                f"- QID: {c.qid} | Label: '{c.label}' | Description: '{c.description or 'N/A'}'"
-                for c in candidates
-            ]
+        document_entities: list[str],
+    ) -> int:
+        listing = "\n".join(
+            f"{i}. {c.label}: {(c.description or 'no description')[:MAX_DESCRIPTION]}"
+            for i, c in enumerate(candidates, 1)
         )
-
-        system_prompt = (
-            "You are an expert Entity Linking system. Your task is to select the exact Wikidata QID "
-            "that matches the target entity in the given text, or assign 'NIL' if none match."
+        prompt = PROMPT.format(
+            context=" ".join(context.split()),
+            document_entities=", ".join(document_entities) or "none",
+            mention=mention,
+            label=label,
+            candidates=listing,
         )
-
-        user_prompt = f"""Full Text Context: "{context_text}"
-Target Entity: "{entity_text}" (Type: {entity_label})
-
-Wikidata Candidates:
-{candidates_formatted}
-
-Instructions:
-1. Compare the target entity and its context against each candidate's label and description.
-2. Select the matching QID or "NIL" if none fits.
-3. Output MUST be a valid JSON object matching this schema:
-{{
-  "selected_qid": "<QID or NIL>",
-  "confidence": <float between 0.0 and 1.0>,
-  "is_nil": <boolean>,
-  "reasoning": "<short explanation>"
-}}"""
-
-        payload = {
-            "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.0,
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+        async with self._semaphore, httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
-                self.llm_api_url, json=payload, headers=headers
+                OLLAMA_URL,
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0,
+                    "max_tokens": 20,  # solo {"choice": n}
+                },
             )
-            response.raise_for_status()
-            data = response.json()
-
-            content = data["choices"][0]["message"]["content"]
-            return LLMDisambiguationResult.model_validate_json(content)
+        response.raise_for_status()
+        data = response.json()
+        self.llm_calls += 1
+        usage = data.get("usage", {})
+        self.total_input_tokens += usage.get("prompt_tokens", 0)
+        self.total_output_tokens += usage.get("completion_tokens", 0)
+        return int(json.loads(data["choices"][0]["message"]["content"])["choice"])

@@ -1,5 +1,3 @@
-import os
-
 from fastapi import FastAPI, HTTPException
 
 from entity_linker.models.schemas import TextLinkingRequest, TextLinkingResponse
@@ -11,8 +9,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# NER_BACKEND=spacy para usar spaCy en lugar de GLiNER
-pipeline = EntityLinkingPipeline(ner_backend=os.getenv("NER_BACKEND", "gliner"))
+pipeline = EntityLinkingPipeline()
 
 @app.get("/")
 def health_check():

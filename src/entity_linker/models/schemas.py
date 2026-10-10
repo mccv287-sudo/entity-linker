@@ -25,6 +25,9 @@ class EntitySpan(StrictModel):
     )
     end_char: int = Field(..., ge=0, description="Índice de fin en el texto original")
     label: str = Field(..., description="Categoría NER (PER, ORG, LOC, MISC)")
+    fine_label: str | None = Field(
+        default=None, description="Tipo fino detectado (p. ej. 'sports team')"
+    )
 
 
 class WikidataCandidate(StrictModel):
